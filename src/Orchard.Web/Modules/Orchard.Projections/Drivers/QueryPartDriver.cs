@@ -7,9 +7,10 @@ using Orchard.ContentManagement.Handlers;
 using Orchard.Forms.Services;
 using Orchard.Projections.Models;
 using Orchard.Projections.Services;
+using Orchard.Projections.ViewModels;
 
 namespace Orchard.Projections.Drivers {
-    
+
     public class QueryPartDriver : ContentPartDriver<QueryPart> {
         private readonly IProjectionManager _projectionManager;
         private readonly IFormManager _formManager;
@@ -18,18 +19,32 @@ namespace Orchard.Projections.Drivers {
             _projectionManager = projectionManager;
             _formManager = formManager;
         }
-
-        protected override DriverResult Editor(QueryPart part, IUpdateModel updater, dynamic shapeHelper) {
-            if(updater == null) {
-                return null;
+        protected override string Prefix {
+            get {
+                return "Query_Part";
             }
-
-            return null;
+        }
+        protected override DriverResult Editor(QueryPart part, dynamic shapeHelper) {
+            return Editor(part, null, shapeHelper);
+        }
+        protected override DriverResult Editor(QueryPart part, IUpdateModel updater, dynamic shapeHelper) {
+            var model = new QueryViewModel { VersionScope = part.VersionScope };
+            if (updater != null) {
+                if (updater.TryUpdateModel(model, Prefix, null, null)) {
+                    part.VersionScope = model.VersionScope;
+                }
+            }
+            return ContentShape("Parts_QueryPart_Edit",
+                                () => {
+                                    return shapeHelper.EditorTemplate(TemplateName: "Parts/QueryPart_Edit", Model: model, Prefix: Prefix);
+                                });
         }
 
         protected override void Exporting(QueryPart part, ExportContentContext context) {
 
             var element = context.Element(part.PartDefinition.Name);
+
+            element.SetAttributeValue("VersionScope", part.VersionScope);
 
             element.Add(
                 new XElement("FilterGroups",
@@ -108,22 +123,24 @@ namespace Orchard.Projections.Drivers {
                 return;
             }
 
+            context.ImportAttribute(part.PartDefinition.Name, "VersionScope", scope => part.VersionScope = (QueryVersionScopeOptions)Enum.Parse(typeof(QueryVersionScopeOptions), scope));
+
             var queryElement = context.Data.Element(part.PartDefinition.Name);
 
             part.Record.FilterGroups.Clear();
             foreach (var item in queryElement.Element("FilterGroups").Elements("FilterGroup").Select(filterGroup =>
                 new FilterGroupRecord {
                     Filters = filterGroup.Elements("Filter").Select(filter => {
-                        
+
                         var category = filter.Attribute("Category").Value;
                         var type = filter.Attribute("Type").Value;
                         var state = filter.Attribute("State").Value;
-                        
+
                         var descriptor = _projectionManager.GetFilter(category, type);
                         if (descriptor != null) {
                             state = _formManager.Import(descriptor.Form, state, context);
                         }
-                        
+
                         return new FilterRecord {
                             Category = category,
                             Description = filter.Attribute("Description").Value,
@@ -186,7 +203,7 @@ namespace Orchard.Projections.Drivers {
         }
 
         private XElement GetPropertyXml(PropertyRecord property) {
-            if(property == null) {
+            if (property == null) {
                 return null;
             }
 
@@ -215,7 +232,7 @@ namespace Orchard.Projections.Drivers {
                 new XAttribute("MaxLength", property.MaxLength),
                 new XAttribute("NoResultText", property.NoResultText ?? ""),
                 new XAttribute("PreserveLines", property.PreserveLines),
-                new XAttribute("RewriteOutput", property.RewriteOutput),
+                new XAttribute("RewriteOutputCondition", property.RewriteOutputCondition ?? ""),
                 new XAttribute("RewriteText", property.RewriteText ?? ""),
                 new XAttribute("StripHtmlTags", property.StripHtmlTags),
                 new XAttribute("TrimLength", property.TrimLength),
@@ -226,7 +243,7 @@ namespace Orchard.Projections.Drivers {
         }
 
         private PropertyRecord GetProperty(XElement property) {
-            if(property == null) {
+            if (property == null) {
                 return null;
             }
 
@@ -253,7 +270,10 @@ namespace Orchard.Projections.Drivers {
                 NoResultText = property.Attribute("NoResultText").Value,
                 Position = Convert.ToInt32(property.Attribute("Position").Value),
                 PreserveLines = Convert.ToBoolean(property.Attribute("PreserveLines").Value),
-                RewriteOutput = Convert.ToBoolean(property.Attribute("RewriteOutput").Value),
+                // RewriteOutput is processed to ensure backwards-compatibility with recipes
+                // that were created before RewriteOutputCondition was added.
+                RewriteOutputCondition = property.Attribute("RewriteOutputCondition")?.Value ??
+                    property.Attribute("RewriteOutput")?.Value,
                 RewriteText = property.Attribute("RewriteText").Value,
                 State = property.Attribute("State").Value,
                 StripHtmlTags = Convert.ToBoolean(property.Attribute("StripHtmlTags").Value),
